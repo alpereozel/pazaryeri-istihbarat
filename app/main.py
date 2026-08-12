@@ -2,12 +2,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, HttpUrl
 from urllib.parse import urlparse
-from datetime import datetime, timezone, timedelta
-import sqlite3, json, re, requests
+from datetime import datetime, timezone
+import sqlite3, json, re, requests, html as html_lib
 from bs4 import BeautifulSoup
 
 DB = "marketintel.db"
-app = FastAPI(title="Pazaryeri İstihbarat MVP", version="0.1.0")
+app = FastAPI(title="Pazaryeri İstihbarat", version="0.3.0")
 
 def db():
     c = sqlite3.connect(DB)
@@ -22,8 +22,10 @@ def init_db():
         url TEXT,
         title TEXT,
         seller TEXT,
+        brand TEXT,
         category TEXT,
         price REAL,
+        list_price REAL,
         rating REAL,
         review_count INTEGER,
         commission_rate REAL DEFAULT 0,
@@ -36,6 +38,7 @@ def init_db():
         price REAL,
         stock INTEGER,
         review_count INTEGER,
+        rating REAL,
         raw_json TEXT
     )""")
     c.commit()
@@ -51,6 +54,7 @@ class SnapshotRequest(BaseModel):
     price: float | None = None
     stock: int | None = None
     review_count: int | None = None
+    rating: float | None = None
 
 def marketplace(url):
     host = urlparse(str(url)).netloc.lower()
@@ -66,69 +70,225 @@ def product_id_from_url(url):
         return m.group(1)
     return re.sub(r"[^a-zA-Z0-9]", "", str(url))[-48:]
 
-def extract_meta(soup):
-    def meta(name=None, prop=None):
-        tag = soup.find("meta", attrs={"name": name}) if name else soup.find("meta", attrs={"property": prop})
-        return tag.get("content") if tag else None
+def clean_text(v):
+    if v is None:
+        return None
+    return re.sub(r"\s+", " ", html_lib.unescape(str(v))).strip()
 
-    title = meta(prop="og:title") or (soup.title.string.strip() if soup.title and soup.title.string else None)
-    desc = meta(prop="og:description")
-    return title, desc
+def to_float(v):
+    if v is None:
+        return None
+    s = str(v).strip()
+    # Turkish decimal handling
+    s = re.sub(r"[^\d,.\-]", "", s)
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except:
+        return None
 
-def fetch_public_page(url):
+def to_int(v):
+    if v is None:
+        return None
+    m = re.search(r"\d[\d\.\s,]*", str(v))
+    if not m:
+        return None
+    s = m.group(0).replace(".", "").replace(" ", "").replace(",", "")
+    try:
+        return int(s)
+    except:
+        return None
+
+def first_jsonld(soup):
+    for tag in soup.find_all("script", type="application/ld+json"):
+        raw = tag.string or tag.get_text()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except:
+            continue
+        candidates = obj if isinstance(obj, list) else [obj]
+        for item in candidates:
+            if isinstance(item, dict) and (
+                item.get("@type") in ("Product", ["Product"]) or "offers" in item or "aggregateRating" in item
+            ):
+                return item
+    return {}
+
+def find_next_number(text, labels):
+    for label in labels:
+        m = re.search(re.escape(label) + r".{0,120}?(\d[\d\.,]*)", text, re.I | re.S)
+        if m:
+            return m.group(1)
+    return None
+
+def parse_public_product(url):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
-        "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.7,en;q=0.5",
+        "Cache-Control": "no-cache"
     }
-    r = requests.get(str(url), headers=headers, timeout=15)
+    r = requests.get(str(url), headers=headers, timeout=20)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
-    title, desc = extract_meta(soup)
-    return {"title": title, "description": desc, "html_bytes": len(r.content)}
+    text = clean_text(soup.get_text(" ", strip=True)) or ""
+    ld = first_jsonld(soup)
 
-def estimate_sales(snapshots):
-    # Basit MVP tahmini:
-    # 1) stok azalışı varsa bunu ana sinyal kabul et
-    # 2) yorum artışını ikincil sinyal kabul et
-    # 3) veri yoksa güven skorunu düşür
-    if len(snapshots) < 2:
-        return {"daily": None, "confidence": 0, "method": "insufficient_data"}
+    title = clean_text(ld.get("name"))
+    if not title:
+        meta = soup.find("meta", property="og:title")
+        title = clean_text(meta.get("content")) if meta else None
+    if not title and soup.title:
+        title = clean_text(soup.title.get_text())
 
-    rows = sorted(snapshots, key=lambda x: x["captured_at"])
-    total_days = (datetime.fromisoformat(rows[-1]["captured_at"]) -
-                  datetime.fromisoformat(rows[0]["captured_at"])).total_seconds() / 86400
+    brand = None
+    b = ld.get("brand")
+    if isinstance(b, dict):
+        brand = clean_text(b.get("name"))
+    elif b:
+        brand = clean_text(b)
 
-    if total_days <= 0:
-        return {"daily": None, "confidence": 0, "method": "invalid_interval"}
+    offers = ld.get("offers") or {}
+    if isinstance(offers, list):
+        offers = offers[0] if offers else {}
+    price = to_float(offers.get("price"))
+    list_price = None
 
-    stock_signal = 0
-    review_signal = 0
+    # Common public-page price signals
+    if price is None:
+        for pat in [
+            r'"salePrice"\s*:\s*([0-9]+(?:[.,][0-9]+)?)',
+            r'"discountedPrice"\s*:\s*([0-9]+(?:[.,][0-9]+)?)',
+            r'"price"\s*:\s*([0-9]+(?:[.,][0-9]+)?)'
+        ]:
+            m = re.search(pat, r.text, re.I)
+            if m:
+                price = to_float(m.group(1))
+                if price:
+                    break
 
-    first, last = rows[0], rows[-1]
-    if first["stock"] is not None and last["stock"] is not None:
-        stock_signal = max(0, first["stock"] - last["stock"]) / total_days
+    # List price / crossed-out price when exposed
+    for pat in [
+        r'"listPrice"\s*:\s*([0-9]+(?:[.,][0-9]+)?)',
+        r'"originalPrice"\s*:\s*([0-9]+(?:[.,][0-9]+)?)',
+        r'"struckPrice"\s*:\s*([0-9]+(?:[.,][0-9]+)?)'
+    ]:
+        m = re.search(pat, r.text, re.I)
+        if m:
+            list_price = to_float(m.group(1))
+            break
 
-    if first["review_count"] is not None and last["review_count"] is not None:
-        review_delta = max(0, last["review_count"] - first["review_count"])
-        # Yorum yazma oranı bilinmediği için konservatif bir katsayı.
-        review_signal = (review_delta * 8) / total_days
+    rating = None
+    review_count = None
+    ar = ld.get("aggregateRating") or {}
+    if isinstance(ar, dict):
+        rating = to_float(ar.get("ratingValue"))
+        review_count = to_int(ar.get("reviewCount") or ar.get("ratingCount"))
 
-    if stock_signal > 0 and review_signal > 0:
-        daily = 0.7 * stock_signal + 0.3 * review_signal
-    else:
-        daily = max(stock_signal, review_signal)
+    if rating is None:
+        v = find_next_number(text, ["Değerlendirme", "Puan", "rating"])
+        rating = to_float(v)
+    if review_count is None:
+        v = find_next_number(text, ["Yorum", "Değerlendirme", "reviews"])
+        review_count = to_int(v)
 
-    days = min(90, max(1, total_days))
-    confidence = min(95, int(30 + days * 1.2 + (20 if stock_signal else 0) + (10 if review_signal else 0)))
+    seller = None
+    if isinstance(offers, dict):
+        s = offers.get("seller")
+        if isinstance(s, dict):
+            seller = clean_text(s.get("name"))
+        elif s:
+            seller = clean_text(s)
+
+    category = None
+    cats = ld.get("category")
+    if cats:
+        category = clean_text(cats)
+
     return {
-        "daily": round(daily, 1),
-        "confidence": confidence,
-        "method": "stock_review_time_series"
+        "title": title,
+        "brand": brand,
+        "seller": seller,
+        "category": category,
+        "price": price,
+        "list_price": list_price,
+        "rating": rating,
+        "review_count": review_count,
+        "http_status": r.status_code,
+        "bytes": len(r.content)
     }
+
+def estimate_from_current(data):
+    # Immediate estimate: a range derived from public review volume.
+    # It is NOT actual marketplace order data.
+    reviews = data.get("review_count")
+    price = data.get("price")
+    rating = data.get("rating")
+
+    if not reviews:
+        return {
+            "daily_low": None, "daily_high": None,
+            "confidence": 10,
+            "basis": "public_data_insufficient"
+        }
+
+    # Conservative review-to-order range. Lifetime review count alone cannot
+    # establish daily sales, so we explicitly present this as a broad heuristic.
+    # Assumption: 1.0%-3.0% of orders result in a visible review, and product
+    # has been actively selling for an estimated 180-540 days.
+    monthly_low = max(1, round(reviews / 540 / 0.03))
+    monthly_high = max(monthly_low, round(reviews / 180 / 0.01))
+
+    # Rating can slightly tighten, never create false precision.
+    if rating and rating >= 4.7:
+        monthly_low = round(monthly_low * 1.05)
+        monthly_high = round(monthly_high * 1.05)
+
+    daily_low = max(1, round(monthly_low / 30))
+    daily_high = max(daily_low, round(monthly_high / 30))
+
+    confidence = 25
+    if price: confidence += 10
+    if rating: confidence += 10
+    if reviews >= 100: confidence += 10
+    confidence = min(confidence, 55)
+
+    return {
+        "daily_low": daily_low,
+        "daily_high": daily_high,
+        "confidence": confidence,
+        "basis": "review_volume_heuristic"
+    }
+
+def periods(est, price):
+    if est.get("daily_low") is None:
+        return {
+            k: {"sales_low": None, "sales_high": None, "revenue_low": None, "revenue_high": None}
+            for k in ("daily","3_days","7_days","monthly")
+        }
+    out={}
+    for key, days in (("daily",1),("3_days",3),("7_days",7),("monthly",30)):
+        lo=est["daily_low"]*days
+        hi=est["daily_high"]*days
+        out[key]={
+            "sales_low": lo, "sales_high": hi,
+            "revenue_low": round(lo*price,2) if price else None,
+            "revenue_high": round(hi*price,2) if price else None
+        }
+    return out
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return HTMLResponse(open("app/static/index.html", encoding="utf-8").read())
+    with open("app/static/index.html", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
 
 @app.post("/api/analyze")
 def analyze(req: AnalyzeRequest):
@@ -138,96 +298,58 @@ def analyze(req: AnalyzeRequest):
         raise HTTPException(400, "Şimdilik sadece Trendyol ve Hepsiburada URL'leri destekleniyor.")
 
     pid = f"{mp}:{product_id_from_url(url)}"
-
     try:
-        page = fetch_public_page(url)
+        data = parse_public_product(url)
     except Exception as e:
-        page = {"title": None, "description": None, "fetch_error": str(e)}
+        raise HTTPException(502, f"Ürün sayfası okunamadı: {e}")
 
-    c = db()
-    existing = c.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
-    if not existing:
-        c.execute("""INSERT INTO products
-        (id, marketplace, url, title, created_at)
-        VALUES(?,?,?,?,?)""",
-        (pid, mp, url, page.get("title"), datetime.now(timezone.utc).isoformat()))
-        c.commit()
+    c=db()
+    c.execute("""INSERT INTO products
+        (id,marketplace,url,title,seller,brand,category,price,list_price,rating,review_count,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET
+        title=excluded.title,seller=excluded.seller,brand=excluded.brand,
+        category=excluded.category,price=excluded.price,list_price=excluded.list_price,
+        rating=excluded.rating,review_count=excluded.review_count""",
+        (pid,mp,url,data["title"],data["seller"],data["brand"],data["category"],
+         data["price"],data["list_price"],data["rating"],data["review_count"],
+         datetime.now(timezone.utc).isoformat()))
+    c.commit()
 
-    snaps = [dict(x) for x in c.execute(
-        "SELECT * FROM snapshots WHERE product_id=? ORDER BY captured_at", (pid,)
-    ).fetchall()]
+    # First snapshot is stored immediately, enabling later time-series tracking.
+    c.execute("""INSERT INTO snapshots(product_id,captured_at,price,stock,review_count,rating,raw_json)
+                 VALUES(?,?,?,?,?,?,?)""",
+              (pid,datetime.now(timezone.utc).isoformat(),data["price"],None,
+               data["review_count"],data["rating"],json.dumps(data,ensure_ascii=False)))
+    c.commit()
 
-    est = estimate_sales(snaps)
-    latest_price = next((s["price"] for s in reversed(snaps) if s["price"] is not None), None)
-    periods = {}
-    for label, days in [("daily",1),("3_days",3),("7_days",7),("monthly",30)]:
-        sales = round(est["daily"] * days, 1) if est["daily"] is not None else None
-        revenue = round(sales * latest_price, 2) if sales is not None and latest_price else None
-        periods[label] = {"sales": sales, "revenue": revenue}
+    est=estimate_from_current(data)
     return {
-        "product_id": pid,
-        "marketplace": mp,
-        "url": url,
-        "page": page,
-        "snapshots": len(snaps),
-        "estimate": est,
-        "periods": periods,
-        "message": "İlk analiz için zaman serisi gerekir. Ürün takip edildikçe tahmin güçlenir."
+        "product_id":pid,
+        "marketplace":mp,
+        "product":data,
+        "estimate":est,
+        "periods":periods(est,data["price"]),
+        "commission_rate":None,
+        "commission_note":"Kategori komisyonu henüz otomatik doğrulanmadı; yanlış oran göstermemek için boş bırakıldı.",
+        "snapshot_count":c.execute("SELECT COUNT(*) FROM snapshots WHERE product_id=?",(pid,)).fetchone()[0],
+        "message":"Bu satış rakamları tahmindir. Gerçek rakip sipariş adedi pazaryerinin herkese açık verisi değildir. Ürün tekrar analiz edildikçe zaman serisi oluşur."
     }
 
 @app.post("/api/snapshots")
 def add_snapshot(req: SnapshotRequest):
-    c = db()
-    if not c.execute("SELECT 1 FROM products WHERE id=?", (req.product_id,)).fetchone():
-        raise HTTPException(404, "Ürün bulunamadı. Önce /api/analyze çağırın.")
-
-    now = datetime.now(timezone.utc).isoformat()
-    c.execute("""INSERT INTO snapshots
-        (product_id,captured_at,price,stock,review_count,raw_json)
-        VALUES(?,?,?,?,?,?)""",
-        (req.product_id, now, req.price, req.stock, req.review_count,
-         json.dumps(req.model_dump(), ensure_ascii=False)))
+    c=db()
+    if not c.execute("SELECT 1 FROM products WHERE id=?",(req.product_id,)).fetchone():
+        raise HTTPException(404,"Ürün bulunamadı. Önce /api/analyze çağırın.")
+    now=datetime.now(timezone.utc).isoformat()
+    c.execute("""INSERT INTO snapshots(product_id,captured_at,price,stock,review_count,rating,raw_json)
+                 VALUES(?,?,?,?,?,?,?)""",
+              (req.product_id,now,req.price,req.stock,req.review_count,req.rating,
+               json.dumps(req.model_dump(),ensure_ascii=False)))
     c.commit()
-    return {"ok": True, "captured_at": now}
+    return {"ok":True,"captured_at":now}
 
 @app.get("/api/products")
 def products():
-    c = db()
-    rows = [dict(x) for x in c.execute("SELECT * FROM products ORDER BY created_at DESC").fetchall()]
-    return rows
-
-@app.get("/api/products/{product_id}")
-def product_detail(product_id: str):
-    c = db()
-    p = c.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
-    if not p:
-        raise HTTPException(404, "Ürün bulunamadı.")
-    snaps = [dict(x) for x in c.execute(
-        "SELECT * FROM snapshots WHERE product_id=? ORDER BY captured_at", (product_id,)
-    ).fetchall()]
-    est = estimate_sales(snaps)
-    price = next((s["price"] for s in reversed(snaps) if s["price"] is not None), p["price"])
-
-    daily_sales = est["daily"]
-    periods = {}
-    for label, days in [
-        ("daily", 1),
-        ("3_days", 3),
-        ("7_days", 7),
-        ("monthly", 30),
-    ]:
-        sales = round(daily_sales * days, 1) if daily_sales is not None else None
-        revenue = round(sales * price, 2) if sales is not None and price else None
-        commission = round(revenue * (p["commission_rate"] or 0) / 100, 2) if revenue else None
-        periods[label] = {
-            "sales": sales,
-            "revenue": revenue,
-            "commission": commission,
-        }
-
-    return {
-        "product": dict(p),
-        "snapshots": snaps,
-        "estimate": est,
-        "periods": periods
-    }
+    c=db()
+    return [dict(x) for x in c.execute("SELECT * FROM products ORDER BY created_at DESC").fetchall()]

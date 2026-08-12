@@ -57,3 +57,11 @@ Analiz ekranında satış ve ciro tahminleri şu sırayla gösterilir:
 4. Aylık (30 günlük) satış + aylık ciro
 
 Bu değerler tahmindir; veri biriktikçe güven skoru yükselir.
+
+
+## V3
+- Ürün sayfasından JSON-LD / meta / HTML sinyallerini okur.
+- Anında ürün fiyatı, marka, satıcı, kategori, puan ve yorum sayısını göstermeye çalışır.
+- Günlük, 3 günlük, 7 günlük ve aylık satış + ciro tahmini üretir.
+- Satış tahmini açıkça heuristik/tahmin olarak etiketlenir.
+- Her analiz ilk snapshot'ı kaydeder.
