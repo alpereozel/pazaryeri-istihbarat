@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pazaryeri İstihbarat</title>
 <style>
-body{font-family:Arial,sans-serif;max-width:1180px;margin:28px auto;padding:0 18px;background:#f5f6f8;color:#151515}.header{margin-bottom:18px}.header h1{margin:0 0 7px;font-size:28px}.muted{color:#666;font-size:13px}.card{background:#fff;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 5px 20px #0000000b}input{width:calc(100% - 120px);box-sizing:border-box;padding:14px;border:1px solid #d8d8d8;border-radius:10px;font-size:14px}button{padding:14px 20px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:700;cursor:pointer}.top{display:flex;gap:8px}.badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#f0f2f5;font-size:11px;text-transform:uppercase}.product-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}.metric{background:#f2f3f5;border-radius:12px;padding:14px}.metric b{display:block;font-size:17px;margin-bottom:4px}.metric span{font-size:12px;color:#666}.section-title{font-size:19px;margin:4px 0 14px}.periods{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.period{background:#f2f3f5;border-radius:13px;padding:15px}.period h3{margin:0 0 10px;font-size:15px}.sales{font-size:20px;font-weight:800}.revenue{font-size:15px;font-weight:700;margin-top:5px}.small{font-size:11px;color:#666}.analysis-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}.why{background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px}.why ul{margin:8px 0 0;padding-left:20px}.warning{margin-top:12px;padding:12px;border-radius:10px;background:#fff3cd;font-size:12px;color:#6b4e00}.link{font-size:12px;word-break:break-all}.error{background:#fff0f0;color:#a00000;padding:14px;border-radius:10px}.score{font-size:24px;font-weight:800}.center{font-size:22px;font-weight:800}.quality{font-size:12px;color:#555}@media(max-width:850px){.product-grid,.periods,.analysis-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:550px){.top{display:block}input{width:100%;margin-bottom:8px}.product-grid,.periods,.analysis-grid{grid-template-columns:1fr}}
+body{font-family:Arial,sans-serif;max-width:1180px;margin:28px auto;padding:0 18px;background:#f5f6f8;color:#151515}.header{margin-bottom:18px}.header h1{margin:0 0 7px;font-size:28px}.muted{color:#666;font-size:13px}.card{background:#fff;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 5px 20px #0000000b}input{width:calc(100% - 120px);box-sizing:border-box;padding:14px;border:1px solid #d8d8d8;border-radius:10px;font-size:14px}button{padding:14px 20px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:700;cursor:pointer}.top{display:flex;gap:8px}.badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#f0f2f5;font-size:11px;text-transform:uppercase}.product-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}.metric{background:#f2f3f5;border-radius:12px;padding:14px}.metric b{display:block;font-size:17px;margin-bottom:4px}.metric span{font-size:12px;color:#666}.section-title{font-size:19px;margin:4px 0 14px}.periods{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.period{background:#f2f3f5;border-radius:13px;padding:15px}.period h3{margin:0 0 10px;font-size:15px}.sales{font-size:20px;font-weight:800}.revenue{font-size:15px;font-weight:700;margin-top:5px}.small{font-size:11px;color:#666}.analysis-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}.why{background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px}.why ul{margin:8px 0 0;padding-left:20px}.warning{margin-top:12px;padding:12px;border-radius:10px;background:#fff3cd;font-size:12px;color:#6b4e00}.link{font-size:12px;word-break:break-all}.error{background:#fff0f0;color:#a00000;padding:14px;border-radius:10px}.score{font-size:24px;font-weight:800}.center{font-size:22px;font-weight:800}.trend{font-size:16px;font-weight:800}.quality{font-size:12px;color:#555}@media(max-width:850px){.product-grid,.periods,.analysis-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:550px){.top{display:block}input{width:100%;margin-bottom:8px}.product-grid,.periods,.analysis-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -51,7 +51,7 @@ async function analyze(){
       ${metric(e.daily_estimate??'—','Tahmini günlük merkez')}
       ${metric('%'+(e.confidence??0),'Tahmin güveni')}
       ${metric((e.score??0)+'/100','Satış potansiyeli')}
-      ${metric(e.basis||'—','Tahmin yöntemi')}
+      ${metric(d.trend?.label||'—','Trend')}
     </div>
     <div class="why" style="margin-top:10px"><b>Neden bu tahmin?</b><ul>${reasons||'<li>Yeterli sinyal yok.</li>'}</ul></div>
     <div class="analysis-grid">
@@ -59,10 +59,12 @@ async function analyze(){
       ${metric(p.sold_total_signal??'—','Açık toplam satış sinyali')}
       ${metric(p.sales_badge?((p.sales_badge_rank?'#'+p.sales_badge_rank+' ':'')+p.sales_badge):'—','Pazaryeri etiketi')}
       ${metric(d.history?.snapshots??0,'Takip snapshot')}
+      ${metric(e.basis||'—','Tahmin yöntemi')}
     </div>
+    ${d.trend?.detail?`<div class="quality" style="margin-top:10px"><b>Trend detayı:</b> ${esc(d.trend.detail)}</div>`:''}
     <div class="warning">⚠️ Bu rakamlar tahmindir; rakip mağazanın gerçek sipariş adedi değildir. Stok toplamı tek başına satış olarak kabul edilmez. Açık satış sinyali bulunmadığında sonuç model tahminidir.</div>
    </div>
-   <div class="card"><b>Veri kalitesi</b><div class="quality" style="margin-top:8px">Tahmin seviyesi: ${esc(e.evidence_level||'—')} · ${esc(d.message||'')}</div></div>`;
+   <div class="card"><b>Veri kalitesi</b><div class="quality" style="margin-top:8px">Tahmin seviyesi: ${esc(e.evidence_level||'—')} · ${esc(d.message||'')}</div><div class="quality" style="margin-top:6px">Not: Satış potansiyeli popülerlik göstergesidir; tahmini satış adedi değildir.</div></div>`;
  }catch(err){document.getElementById('result').innerHTML=`<div class="card"><div class="error">${esc(err.message)}</div></div>`}
 }
 </script>

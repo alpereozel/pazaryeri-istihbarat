@@ -7,7 +7,7 @@ import sqlite3, json, re, requests, html as html_lib, math
 from bs4 import BeautifulSoup
 
 DB = "marketintel.db"
-app = FastAPI(title="Pazaryeri İstihbarat", version="0.8.0")
+app = FastAPI(title="Pazaryeri İstihbarat", version="0.9.0")
 
 
 def db():
@@ -442,88 +442,118 @@ def time_series_signal(history):
     }
 
 
+def trend_from_history(history):
+    ts = time_series_signal(history)
+    if not ts:
+        return {"label": "Yeterli zaman serisi yok", "direction": "unknown", "detail": "En az iki ölçüm ve anlamlı zaman aralığı gerekir."}
+    rv = ts.get("review_velocity")
+    sv = ts.get("stock_velocity")
+    if rv is not None and rv > 0:
+        return {"label": "Yükselen", "direction": "up", "detail": f"Günde yaklaşık {rv:.2f} yeni yorum gözlendi."}
+    if sv is not None and sv > 0:
+        return {"label": "Hareket var", "direction": "up", "detail": f"Gözlenen stok azalışı yaklaşık {sv:.1f}/gün; satış olarak kabul edilmedi."}
+    return {"label": "Yatay / belirsiz", "direction": "flat", "detail": "Son ölçümlerde güçlü yön sinyali yok."}
+
+
 def estimate_from_current(data, history):
-    """Evidence-weighted estimate. Never treats total stock as sales."""
+    """Separate popularity potential from sales quantity. Sales quantity is always an estimate unless an explicit public signal exists."""
     p24 = data.get("purchase_signal_24h")
+    rank = data.get("category_rank") or data.get("sales_badge_rank")
+    reviews = data.get("review_count") or 0
+    ts = time_series_signal(history)
+
     if p24 is not None:
-        # Explicit public signal is the only case where we can give a tight estimate.
         lo = max(1, math.floor(p24 * 0.90))
         hi = max(lo, math.ceil(p24 * 1.10))
         return {
             "daily_estimate": p24, "daily_low": lo, "daily_high": hi,
-            "confidence": 92, "basis": "Açık 24 saatlik satış sinyali", "score": min(100, 80 + min(20, p24 // 5)),
-            "reasons": ["Sayfada açık 24 saatlik satın alma sinyali bulundu."],
-            "evidence_level": "strong",
+            "confidence": 92, "basis": "Açık 24 saatlik satış sinyali", "score": min(100, 85 + min(15, p24 // 10)),
+            "reasons": ["Sayfada açık 24 saatlik satın alma sinyali bulundu.", "Bu sinyal herkese açık olduğu için satış miktarında en güçlü kanıt olarak kullanıldı."],
+            "evidence_level": "strong", "trend": trend_from_history(history)
         }
 
-    ts = time_series_signal(history)
-    if ts and ts.get("review_velocity") is not None and ts["review_velocity"] > 0 and ts["days"] >= 1:
-        # Conservative review-to-order conversion. It is a model assumption, not a fact.
-        # 2% of daily reviews as an order proxy, bounded to avoid extreme estimates.
-        daily = max(1, round(ts["review_velocity"] / 0.02))
-        daily = min(daily, 250)
-        lo = max(1, round(daily * 0.85))
-        hi = max(lo, math.ceil(daily * 1.15))
-        confidence = min(78, 45 + int(min(30, ts["days"] * 2)) + (8 if ts["review_delta"] >= 10 else 0))
-        reasons = [f"İzleme süresinde günde yaklaşık {ts['review_velocity']:.2f} yeni yorum gözlendi.", "Yorum→sipariş dönüşümü model varsayımıdır; gerçek sipariş değildir."]
+    # If we have measured review velocity over time, use it as the strongest indirect signal.
+    if ts and ts.get("review_velocity") is not None and ts["days"] >= 1 and ts["review_velocity"] > 0:
+        # Review -> order conversion is uncertain, so use a deliberately broad prior.
+        # Approx. 1 review per 20-60 orders, bounded to prevent runaway estimates.
+        center = max(1, round(ts["review_velocity"] * 40))
+        center = min(center, 300)
+        lo = max(1, math.floor(center * 0.55))
+        hi = max(lo, math.ceil(center * 1.45))
+        confidence = min(65, 35 + int(min(20, ts["days"] * 2)) + (5 if ts["review_delta"] and ts["review_delta"] >= 10 else 0))
+        reasons = [
+            f"İzleme süresinde günde yaklaşık {ts['review_velocity']:.2f} yeni yorum gözlendi.",
+            "Yorum→sipariş dönüşümü bir model varsayımıdır; gerçek sipariş değildir."
+        ]
         if ts.get("stock_velocity"):
-            reasons.append(f"Gözlenen stok azalışı yaklaşık {ts['stock_velocity']:.1f} adet/gün; yalnızca yardımcı sinyal olarak kullanıldı.")
+            reasons.append(f"Gözlenen stok azalışı yaklaşık {ts['stock_velocity']:.1f}/gün; yalnızca yardımcı sinyal olarak kullanıldı.")
         return {
-            "daily_estimate": daily, "daily_low": lo, "daily_high": hi,
-            "confidence": confidence, "basis": "Yorum hızı + zaman serisi", "score": min(100, 55 + confidence // 2),
-            "reasons": reasons, "evidence_level": "medium",
+            "daily_estimate": center, "daily_low": lo, "daily_high": hi,
+            "confidence": confidence, "basis": "Yorum hızı + zaman serisi", "score": popularity_score(data),
+            "reasons": reasons, "evidence_level": "medium", "trend": trend_from_history(history)
         }
 
-    rank = data.get("category_rank") or data.get("sales_badge_rank")
-    reviews = data.get("review_count") or 0
     if rank is not None:
-        # Rank is used to create a score and a prior, not a claimed exact sales number.
-        # Rank supplies a strong popularity prior, while review volume scales it.
-        # This is intentionally a model estimate, not a claimed order count.
-        if rank <= 3:
-            daily = max(8, round(reviews / 90))
-            score = 88
-        elif rank <= 10:
-            daily = max(5, round(reviews / 110))
-            score = 82
-        elif rank <= 25:
-            daily = max(3, round(reviews / 130))
-            score = 76
-        elif rank <= 50:
-            daily = max(2, round(reviews / 150))
-            score = 68
-        elif rank <= 100:
-            daily = max(1, round(reviews / 180))
-            score = 60
-        else:
-            daily = max(1, round(reviews / 220))
-            score = 52
-        lo = max(1, round(daily * 0.9))
-        hi = max(lo, math.ceil(daily * 1.1))
+        # Rank is a popularity signal, not a direct order count. Review volume is used only to scale a prior.
+        rank_factor = 1.0 / math.sqrt(max(1, rank))
+        base = max(3, reviews / 100.0) if reviews else 8
+        center = max(3, round(base * (1.15 if rank <= 3 else 1.0 if rank <= 10 else 0.85 if rank <= 25 else 0.70 if rank <= 50 else 0.55)))
+        center = min(center, 250)
+        # Keep the band useful but honest while evidence is indirect.
+        band = 0.30 if rank <= 10 else 0.35
+        lo = max(1, math.floor(center * (1 - band)))
+        hi = max(lo, math.ceil(center * (1 + band)))
         return {
-            "daily_estimate": daily, "daily_low": lo, "daily_high": hi,
-            "confidence": max(30, score - 25), "basis": "Kategori satış sırası + yorum hacmi",
-            "score": score, "reasons": [f"Kategori/satış sırası sinyali: #{rank}.", f"Toplam yorum: {reviews}.", "Kategori sırası satış adedini doğrudan göstermez; yorum hacmiyle birlikte model öncülü olarak kullanıldı."],
-            "evidence_level": "medium-low",
+            "daily_estimate": center, "daily_low": lo, "daily_high": hi,
+            "confidence": 32 if rank <= 10 else 28,
+            "basis": "Kategori satış sırası + yorum hacmi", "score": popularity_score(data),
+            "reasons": [
+                f"Kategori/satış sırası sinyali: #{rank}.",
+                f"Toplam yorum: {reviews}.",
+                "Kategori sırası satış adedini doğrudan göstermez; yorum hacmiyle birlikte satış öncülü olarak kullanıldı.",
+                "Gerçek sipariş verisi olmadığı için güven skoru sınırlı tutuldu."
+            ],
+            "evidence_level": "medium-low", "trend": trend_from_history(history)
         }
 
     if reviews:
-        # No rank/no explicit purchase signal: narrow enough to be readable, but clearly low confidence.
-        daily = max(1, min(50, round(reviews / 70)))
-        lo = max(1, round(daily * 0.85))
-        hi = max(lo, math.ceil(daily * 1.15))
+        center = max(1, min(80, round(reviews / 120)))
+        lo = max(1, math.floor(center * 0.65))
+        hi = max(lo, math.ceil(center * 1.35))
         return {
-            "daily_estimate": daily, "daily_low": lo, "daily_high": hi,
-            "confidence": 25, "basis": "Yorum hacmi ön tahmini", "score": 30,
-            "reasons": [f"Toplam yorum: {reviews}.", "Açık satış sinyali ve kategori sırası bulunamadı.", "Ürün yaşı bilinmediği için güven düşüktür."],
-            "evidence_level": "weak",
+            "daily_estimate": center, "daily_low": lo, "daily_high": hi,
+            "confidence": 18, "basis": "Yorum hacmi ön tahmini", "score": popularity_score(data),
+            "reasons": [f"Toplam yorum: {reviews}.", "Açık satış sinyali ve kategori sırası bulunamadı.", "Ürün yaşı ve yorum dönüşüm oranı bilinmediği için güven düşüktür."],
+            "evidence_level": "weak", "trend": trend_from_history(history)
         }
 
     return {
         "daily_estimate": None, "daily_low": None, "daily_high": None, "confidence": 5,
         "basis": "Yeterli açık veri yok", "score": 10,
         "reasons": ["Günlük satış için kullanılabilir açık sinyal bulunamadı."], "evidence_level": "none",
+        "trend": trend_from_history(history)
     }
+
+
+def popularity_score(data):
+    """0-100 popularity potential. This is intentionally separate from estimated unit sales."""
+    rank = data.get("category_rank") or data.get("sales_badge_rank")
+    reviews = data.get("review_count") or 0
+    rating = data.get("rating") or 0
+    score = 20
+    if rank is not None:
+        if rank == 1: score += 60
+        elif rank <= 3: score += 55
+        elif rank <= 10: score += 48
+        elif rank <= 25: score += 38
+        elif rank <= 50: score += 30
+        elif rank <= 100: score += 22
+        else: score += 12
+    elif reviews:
+        score += min(35, round(math.log10(max(10, reviews)) * 9))
+    if rating >= 4.5: score += 8
+    elif rating >= 4.0: score += 5
+    return min(100, score)
 
 
 def make_periods(est, price):
@@ -579,6 +609,7 @@ def analyze(req: AnalyzeRequest):
         "product_id": pid, "marketplace": mp, "product": data,
         "estimate": est, "periods": make_periods(est, data.get("price")),
         "history": {"snapshots": len(history), "time_series": time_series_signal(history)},
+        "trend": est.get("trend"),
         "commission_rate": None,
         "commission_note": "Kategori komisyonu henüz otomatik doğrulanmadı; yanlış oran göstermemek için boş bırakıldı.",
         "message": "Tahmin gerçek sipariş verisi değildir. Güçlü açık satış sinyali varsa önceliklidir; aksi halde kategori sırası, yorum hızı ve diğer açık sinyaller birlikte değerlendirilir.",
