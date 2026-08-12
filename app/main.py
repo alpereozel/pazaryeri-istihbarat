@@ -7,7 +7,7 @@ import sqlite3, json, re, requests, html as html_lib, math
 from bs4 import BeautifulSoup
 
 DB = "marketintel.db"
-app = FastAPI(title="Pazaryeri İstihbarat", version="0.7.0")
+app = FastAPI(title="Pazaryeri İstihbarat", version="0.8.0")
 
 
 def db():
@@ -251,6 +251,55 @@ def detect_category_rank(text):
     return None
 
 
+
+def normalize_title(s):
+    s=clean_text(s or '').lower()
+    s=re.sub(r'[^a-z0-9çğıöşü ]+',' ',s)
+    return re.sub(r'\s+',' ',s).strip()
+
+
+def category_page_rank(category_url, product_title):
+    """Try to recover the marketplace's explicit 'En Çok Satan #N' label from the category page."""
+    if not category_url or 'trendyol.com' not in urlparse(category_url).netloc:
+        return None, None
+    try:
+        headers={
+            'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36',
+            'Accept-Language':'tr-TR,tr;q=0.9,en;q=0.8'
+        }
+        rr=requests.get(category_url,headers=headers,timeout=15)
+        if rr.status_code!=200:
+            return None,None
+        soup=BeautifulSoup(rr.text,'html.parser')
+        page_text=clean_text(soup.get_text(' ',strip=True)) or ''
+        # First, use DOM cards where the product title and badge live close together.
+        target=normalize_title(product_title)
+        best=None
+        for node in soup.find_all(['a','div','li','article']):
+            txt=clean_text(node.get_text(' ',strip=True)) or ''
+            nt=normalize_title(txt)
+            if target and len(target)>20 and target[:70] in nt:
+                m=re.search(r'En\s*Çok\s*Satan\s*(\d+)?\.?\s*Ürün',txt,re.I)
+                if m:
+                    return int(m.group(1)) if m.group(1) else 1, 'En Çok Satan'
+                # Some category cards have the badge and title separated in parent text.
+                parent=clean_text(node.parent.get_text(' ',strip=True)) if node.parent else ''
+                m=re.search(r'En\s*Çok\s*Satan\s*(\d+)?\.?\s*Ürün',parent,re.I)
+                if m:
+                    return int(m.group(1)) if m.group(1) else 1, 'En Çok Satan'
+        # Fallback: search snippets around a distinctive product-title fragment.
+        frag=target[:80] if target else ''
+        if frag:
+            pos=normalize_title(page_text).find(frag)
+            if pos>=0:
+                window=page_text[max(0,pos-300):pos+300]
+                m=re.search(r'En\s*Çok\s*Satan\s*(\d+)?\.?\s*Ürün',window,re.I)
+                if m:
+                    return int(m.group(1)) if m.group(1) else 1, 'En Çok Satan'
+        return None,None
+    except Exception:
+        return None,None
+
 def parse_public_product(url):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
@@ -303,6 +352,10 @@ def parse_public_product(url):
         s = offers.get("seller")
         seller = clean_text(s.get("name")) if isinstance(s, dict) else clean_text(s)
     seller = seller or find_json_value(r.text, ["merchantName", "sellerName", "merchantTitle", "sellerTitle", "merchant_name"])
+    if not seller:
+        m = re.search(r'Bu ürün\s+([A-Za-z0-9ÇĞİÖŞÜçğıöşü .&_-]{2,80})\s+tarafından gönderilecektir', text, re.I)
+        if m:
+            seller = clean_text(m.group(1))
 
     category = clean_text(ld.get("category"))
     category = category or find_json_value(r.text, ["categoryName", "categoryTitle", "webCategory", "categoryPath", "category_name"])
@@ -327,6 +380,15 @@ def parse_public_product(url):
     purchase_24h = detect_purchase_signal(text)
     badge, badge_rank = detect_badge(text)
     category_rank = detect_category_rank(text) or badge_rank
+    category_rank_source = 'ürün sayfası' if category_rank else None
+    if category_rank is None and category_url and category:
+        page_rank, page_badge = category_page_rank(category_url, title)
+        if page_rank is not None:
+            category_rank = page_rank
+            category_rank_source = 'kategori sayfası'
+            if not badge:
+                badge = page_badge
+                badge_rank = page_rank
     sold_total = detect_sold_signal(text)
     stock = None
     for pat in [r'"(?:stock|quantity|availableQuantity)"\s*:\s*(\d+)', r'"(?:stockCount|inventory)"\s*:\s*(\d+)']:
@@ -338,7 +400,7 @@ def parse_public_product(url):
         "title": title, "brand": brand, "seller": seller, "category": category, "category_url": category_url,
         "price": price, "list_price": list_price, "rating": rating, "review_count": review_count,
         "purchase_signal_24h": purchase_24h, "sales_badge": badge, "sales_badge_rank": badge_rank,
-        "category_rank": category_rank, "sold_total_signal": sold_total, "stock": stock,
+        "category_rank": category_rank, "category_rank_source": category_rank_source, "sold_total_signal": sold_total, "stock": stock,
         "http_status": r.status_code, "bytes": len(r.content),
     }
 
@@ -416,27 +478,32 @@ def estimate_from_current(data, history):
     reviews = data.get("review_count") or 0
     if rank is not None:
         # Rank is used to create a score and a prior, not a claimed exact sales number.
-        if rank <= 10:
-            daily = max(3, round(max(1, reviews) / 25))
+        # Rank supplies a strong popularity prior, while review volume scales it.
+        # This is intentionally a model estimate, not a claimed order count.
+        if rank <= 3:
+            daily = max(8, round(reviews / 90))
             score = 88
+        elif rank <= 10:
+            daily = max(5, round(reviews / 110))
+            score = 82
         elif rank <= 25:
-            daily = max(2, round(max(1, reviews) / 35))
-            score = 80
+            daily = max(3, round(reviews / 130))
+            score = 76
         elif rank <= 50:
-            daily = max(2, round(max(1, reviews) / 45))
-            score = 72
+            daily = max(2, round(reviews / 150))
+            score = 68
         elif rank <= 100:
-            daily = max(1, round(max(1, reviews) / 60))
-            score = 64
+            daily = max(1, round(reviews / 180))
+            score = 60
         else:
-            daily = max(1, round(max(1, reviews) / 80))
-            score = 55
-        lo = max(1, round(daily * 0.85))
-        hi = max(lo, math.ceil(daily * 1.15))
+            daily = max(1, round(reviews / 220))
+            score = 52
+        lo = max(1, round(daily * 0.9))
+        hi = max(lo, math.ceil(daily * 1.1))
         return {
             "daily_estimate": daily, "daily_low": lo, "daily_high": hi,
             "confidence": max(30, score - 25), "basis": "Kategori satış sırası + yorum hacmi",
-            "score": score, "reasons": [f"Kategori/satış sırası sinyali: #{rank}.", f"Toplam yorum: {reviews}.", "Sıralama satış adedini doğrudan göstermez; tahmin için öncül olarak kullanıldı."],
+            "score": score, "reasons": [f"Kategori/satış sırası sinyali: #{rank}.", f"Toplam yorum: {reviews}.", "Kategori sırası satış adedini doğrudan göstermez; yorum hacmiyle birlikte model öncülü olarak kullanıldı."],
             "evidence_level": "medium-low",
         }
 

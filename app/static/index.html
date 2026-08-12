@@ -38,6 +38,7 @@ async function analyze(){
       ${metric(p.brand||'—','Marka')}
       ${metric(p.category||'—','Kategori')}
       ${metric(rank?('#'+rank):'—','Kategori/satış sırası')}
+      ${metric(p.category_rank_source||'—','Sıra veri kaynağı')}
     </div>
     ${p.category_url?`<div class="link" style="margin-top:10px">Kategori: ${esc(p.category_url)}</div>`:''}
    </div>
