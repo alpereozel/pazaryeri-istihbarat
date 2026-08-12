@@ -28,3 +28,10 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
 > Not: Render Free üzerinde yerel SQLite kalıcı veri tabanı değildir; üretim sürümünde PostgreSQL veya başka kalıcı depolama kullanılmalıdır.
+
+
+## V6 tahmin sunumu
+- Günlük merkez tahmin ayrıca gösterilir.
+- Satış aralıkları önceki sürüme göre daraltıldı.
+- Varsayılan tahmin bandı yaklaşık ±25% seviyesindedir.
+- Bu daraltma doğruluğu garanti etmez; veri yetersizse güven skoru düşük kalır.

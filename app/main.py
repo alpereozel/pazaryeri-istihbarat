@@ -277,11 +277,23 @@ def time_series_signal(history):
 
 
 def estimate_from_current(data, history):
-    # 1) Explicit public 24h purchase count: strongest signal.
+    """
+    Satış tahmini:
+    - Açık 24 saatlik satış sinyali varsa doğrudan kullanılır.
+    - Zaman serisi varsa yorum hızı ana sinyaldir; aralık dar tutulur.
+    - Satış etiketi + yorum hacmi varsa merkez tahmin üretilir.
+    - Yalnız yorum hacmi varsa daha temkinli merkez tahmin üretilir.
+
+    Önemli: Bu değerler rakibin gerçek siparişleri değildir.
+    Veri yetersiz olduğunda güven skoru düşürülür.
+    """
     p24 = data.get("purchase_signal_24h")
     if p24 is not None:
         return {
-            "daily_low": p24, "daily_high": p24, "confidence": 92,
+            "daily_estimate": p24,
+            "daily_low": p24,
+            "daily_high": p24,
+            "confidence": 92,
             "basis": "Açık 24 saatlik satış sinyali",
             "score": min(100, 75 + min(25, p24 // 5)),
             "reasons": ["Sayfada açık 24 saatlik satın alma sinyali bulundu."]
@@ -289,52 +301,88 @@ def estimate_from_current(data, history):
 
     ts = time_series_signal(history)
     if ts and ts.get("review_velocity") and ts["review_velocity"] > 0:
-        # Review-rate heuristic: assume roughly 2%–10% of orders produce a review.
-        # This is intentionally wide and low-confidence.
+        # Geniş yorum→sipariş varsayımını tek başına büyütmek yerine
+        # merkez tahmin + sınırlı güven bandı kullanıyoruz.
         rv = ts["review_velocity"]
-        lo = max(1, math.ceil(rv / 0.10))
-        hi = max(lo, math.ceil(rv / 0.02))
-        # If stock also fell, use it as a conservative observed floor, not as proof of sales.
+        daily = max(1, round(rv / 0.05))
+        lo = max(1, round(daily * 0.75))
+        hi = max(lo, math.ceil(daily * 1.25))
+
+        # Gözlenen stok düşüşü varsa yalnızca yardımcı kontrol olarak kullan.
         if ts.get("stock_velocity") and ts["stock_velocity"] > 0:
-            lo = max(lo, math.floor(ts["stock_velocity"] * 0.7))
+            observed = ts["stock_velocity"]
+            daily = max(daily, round(observed * 0.8))
+            lo = max(1, math.floor(daily * 0.80))
+            hi = max(lo, math.ceil(daily * 1.20))
+
         return {
-            "daily_low": lo, "daily_high": hi, "confidence": 55,
+            "daily_estimate": daily,
+            "daily_low": lo,
+            "daily_high": hi,
+            "confidence": 60,
             "basis": "Yorum hızı + zaman serisi",
-            "score": min(100, 45 + int(min(35, rv * 10))),
-            "reasons": [f"İzleme süresinde günde yaklaşık {rv:.1f} yeni yorum gözlendi.", "Yorum→sipariş oranı için geniş (%2–10) varsayım kullanıldı."]
+            "score": min(100, 50 + int(min(40, rv * 10))),
+            "reasons": [
+                f"İzleme süresinde günde yaklaşık {rv:.1f} yeni yorum gözlendi.",
+                "Merkez tahmin etrafında yaklaşık ±20% dar güven bandı kullanıldı."
+            ]
         }
 
     rank = data.get("sales_badge_rank")
     reviews = data.get("review_count") or 0
     if rank is not None and reviews:
-        # A broad prior. Rank changes the range, but never pretends to be actual orders.
-        base_lo = max(1, math.ceil(reviews / 180))
-        base_hi = max(base_lo, math.ceil(reviews / 30))
-        if rank <= 10: mult_lo, mult_hi = 1.8, 3.0
-        elif rank <= 50: mult_lo, mult_hi = 1.3, 2.0
-        elif rank <= 100: mult_lo, mult_hi = 1.1, 1.5
-        else: mult_lo, mult_hi = 1.0, 1.25
-        lo = max(1, math.floor(base_lo * mult_lo))
-        hi = max(lo, math.ceil(base_hi * mult_hi))
+        # Kategori etiketi güçlü bir sıralama sinyalidir; ancak gerçek sipariş
+        # sayısını göstermez. Bu nedenle merkez tahmin + ±20% bandı kullanılır.
+        base = max(1, round(reviews / 60))
+        if rank <= 10:
+            mult = 2.0
+        elif rank <= 50:
+            mult = 1.5
+        elif rank <= 100:
+            mult = 1.25
+        else:
+            mult = 1.0
+
+        daily = max(1, round(base * mult))
+        lo = max(1, round(daily * 0.75))
+        hi = max(lo, math.ceil(daily * 1.25))
+
         return {
-            "daily_low": lo, "daily_high": hi, "confidence": 48 if rank <= 50 else 38,
+            "daily_estimate": daily,
+            "daily_low": lo,
+            "daily_high": hi,
+            "confidence": 48 if rank <= 50 else 40,
             "basis": "Kategori satış etiketi + yorum hacmi",
             "score": max(35, 90 - min(60, rank)),
-            "reasons": [f"Açık satış etiketi: En Çok Satan #{rank}.", f"Toplam yorum: {reviews}.", "Bu, kategori sıralaması ile yorum hacminden üretilen heuristik bir aralıktır."]
+            "reasons": [
+                f"Açık satış etiketi: En Çok Satan #{rank}.",
+                f"Toplam yorum: {reviews}.",
+                "Merkez tahmin etrafında yaklaşık ±20% güven bandı kullanıldı."
+            ]
         }
 
     if reviews:
-        lo = max(1, math.ceil(reviews / 180))
-        hi = max(lo, math.ceil(reviews / 30))
+        # Yalnızca yorum hacmi varsa merkez tahmin üret, fakat düşük güveni açıkça göster.
+        # Ürünün yaşı bilinmediği için bu yalnızca bir ön tahmindir.
+        daily = max(1, round(reviews / 60))
+        lo = max(1, round(daily * 0.75))
+        hi = max(lo, math.ceil(daily * 1.25))
         return {
-            "daily_low": lo, "daily_high": hi, "confidence": 25,
-            "basis": "Yorum hacmi heuristiği",
+            "daily_estimate": daily,
+            "daily_low": lo,
+            "daily_high": hi,
+            "confidence": 25,
+            "basis": "Yorum hacmi ön tahmini",
             "score": 30,
-            "reasons": [f"Toplam yorum: {reviews}.", "Kategori satış sırası veya açık satış sinyali bulunamadı; geniş tahmin aralığı kullanıldı."]
+            "reasons": [
+                f"Toplam yorum: {reviews}.",
+                "Kategori satış sırası veya açık satış sinyali bulunamadı.",
+                "Bu nedenle sonuç ön tahmindir; ürün yaşı bilinmediği için güven düşüktür."
+            ]
         }
 
     return {
-        "daily_low": None, "daily_high": None, "confidence": 5,
+        "daily_estimate": None, "daily_low": None, "daily_high": None, "confidence": 5,
         "basis": "Yeterli açık veri yok", "score": 10,
         "reasons": ["Günlük satış için kullanılabilir açık sinyal bulunamadı."]
     }
