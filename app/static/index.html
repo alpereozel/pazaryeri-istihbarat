@@ -81,9 +81,14 @@ async function analyze(){
           <div><b>${val(p.brand)}</b><br><span class="muted">Marka</span></div>
           <div><b>${val(p.category)}</b><br><span class="muted">Kategori</span></div>
         </div>
+        <div class="info" style="margin-top:12px">
+          <div><b>${val(p.purchase_signal_24h)}</b><br><span class="muted">Açık 24s satış sinyali</span></div>
+          <div><b>${val(p.sales_badge)}${p.sales_badge_rank ? ' #' + p.sales_badge_rank : ''}</b><br><span class="muted">Pazaryeri etiketi</span></div>
+          <div><b>${val(p.stock)}</b><br><span class="muted">Açık stok sinyali</span></div>
+          <div><b>${e.basis||'—'}</b><br><span class="muted">Model tabanı</span></div>
+        </div>
         <div class="warning">
-          ⚠️ Bu satış ve ciro rakamları <b>tahmindir</b>; rakip mağazanın gerçek sipariş adedi kamuya açık değildir.
-          Ürün tekrar analiz edildikçe zaman serisi oluşacak ve tahmin modeli güçlendirilecektir.
+          ⚠️ Bu satış ve ciro rakamları <b>tahmindir</b>. Açık bir “son 24 saatte X kişi aldı” sinyali bulunursa onu öncelikli kullanırız; yoksa model yorum/etiket gibi dolaylı sinyallere düşer. Ürün tekrar analiz edildikçe zaman serisi oluşacak ve tahmin modeli güçlendirilecektir.
         </div>
       </div>
 

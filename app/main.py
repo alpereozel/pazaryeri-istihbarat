@@ -7,7 +7,7 @@ import sqlite3, json, re, requests, html as html_lib
 from bs4 import BeautifulSoup
 
 DB = "marketintel.db"
-app = FastAPI(title="Pazaryeri İstihbarat", version="0.3.0")
+app = FastAPI(title="Pazaryeri İstihbarat", version="0.4.0")
 
 def db():
     c = sqlite3.connect(DB)
@@ -129,6 +129,45 @@ def find_next_number(text, labels):
             return m.group(1)
     return None
 
+
+def find_json_value(text, keys):
+    for key in keys:
+        # quoted JSON-ish key/value
+        pats = [
+            rf'"{re.escape(key)}"\s*:\s*"([^"]+)"',
+            rf'"{re.escape(key)}"\s*:\s*([0-9]+(?:[.,][0-9]+)?)',
+            rf"'{re.escape(key)}'\s*:\s*'([^']+)'",
+        ]
+        for pat in pats:
+            m = re.search(pat, text, re.I)
+            if m:
+                return clean_text(m.group(1))
+    return None
+
+def detect_purchase_signal(text):
+    patterns = [
+        r'(?:son\s*24\s*saatte|son\s*24\s*saat içinde)\s*(\d+)\s*(?:kişi|adet)\s*(?:aldı|satın aldı)',
+        r'(\d+)\s*(?:kişi|adet)\s*(?:bu ürünü\s*)?(?:aldı|satın aldı)\s*(?:son\s*24\s*saatte)?',
+        r'(?:last\s*24\s*hours)\s*(\d+)\s*(?:people|orders|units)',
+    ]
+    for pat in patterns:
+        m=re.search(pat,text,re.I)
+        if m:
+            return int(m.group(1))
+    return None
+
+def detect_badge(text):
+    pats=[
+        r'En\s*Çok\s*Satan\s*(\d+)?\.?\s*Ürün',
+        r'En\s*çok\s*satan\s*(\d+)?\.?\s*ürün',
+        r'Best\s*Seller\s*(\d+)?',
+    ]
+    for pat in pats:
+        m=re.search(pat,text,re.I)
+        if m:
+            return ('En Çok Satan', int(m.group(1)) if m.group(1) else None)
+    return (None,None)
+
 def parse_public_product(url):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151 Safari/537.36",
@@ -207,66 +246,83 @@ def parse_public_product(url):
             seller = clean_text(s.get("name"))
         elif s:
             seller = clean_text(s)
+    if not seller:
+        seller = find_json_value(r.text, ["merchantName","sellerName","merchantTitle","sellerTitle","merchant_name"])
 
     category = None
     cats = ld.get("category")
     if cats:
         category = clean_text(cats)
+    if not category:
+        # Prefer explicit breadcrumb/category JSON values if exposed.
+        category = find_json_value(r.text, ["categoryName","categoryTitle","webCategory","categoryPath","category_name"])
+    if not category:
+        bc = soup.find_all(attrs={"itemprop":"name"})
+        names=[clean_text(x.get_text(" ",strip=True)) for x in bc if clean_text(x.get_text(" ",strip=True))]
+        if names:
+            category = " > ".join(names[-4:])
+
+    purchase_24h = detect_purchase_signal(text)
+    badge, badge_rank = detect_badge(text)
+    stock = None
+    for pat in [
+        r'"(?:stock|quantity|availableQuantity)"\s*:\s*(\d+)',
+        r'"(?:stockCount|inventory)"\s*:\s*(\d+)'
+    ]:
+        m=re.search(pat,r.text,re.I)
+        if m:
+            stock=int(m.group(1)); break
 
     return {
         "title": title,
-        "brand": brand,
+        "brand": brand or find_json_value(r.text,["brandName","brandTitle"]),
         "seller": seller,
         "category": category,
         "price": price,
         "list_price": list_price,
         "rating": rating,
         "review_count": review_count,
+        "purchase_signal_24h": purchase_24h,
+        "sales_badge": badge,
+        "sales_badge_rank": badge_rank,
+        "stock": stock,
         "http_status": r.status_code,
         "bytes": len(r.content)
     }
 
 def estimate_from_current(data):
-    # Immediate estimate: a range derived from public review volume.
-    # It is NOT actual marketplace order data.
-    reviews = data.get("review_count")
-    price = data.get("price")
-    rating = data.get("rating")
+    # Tier 1: an explicit public 24h purchase signal is the strongest
+    # instantaneous signal we can use.
+    p24=data.get("purchase_signal_24h")
+    if p24 is not None:
+        return {"daily_low":p24,"daily_high":p24,"confidence":90,"basis":"public_24h_purchase_signal"}
 
-    if not reviews:
-        return {
-            "daily_low": None, "daily_high": None,
-            "confidence": 10,
-            "basis": "public_data_insufficient"
-        }
+    # Tier 2: a marketplace badge such as "En Çok Satan" is a useful
+    # qualitative signal, but does not reveal a count. Keep the range broad.
+    rank=data.get("sales_badge_rank")
+    reviews=data.get("review_count")
+    rating=data.get("rating")
+    if rank is not None and reviews:
+        # Rank is only used to adjust a broad review-based prior.
+        base_low=max(1, round(reviews/90/30))
+        base_high=max(base_low, round(reviews/30/10))
+        factor=max(1.0, min(2.0, 10/max(rank,1)))
+        lo=max(1, round(base_low*factor))
+        hi=max(lo, round(base_high*factor))
+        return {"daily_low":lo,"daily_high":hi,"confidence":50,"basis":"review_volume_plus_sales_badge"}
 
-    # Conservative review-to-order range. Lifetime review count alone cannot
-    # establish daily sales, so we explicitly present this as a broad heuristic.
-    # Assumption: 1.0%-3.0% of orders result in a visible review, and product
-    # has been actively selling for an estimated 180-540 days.
-    monthly_low = max(1, round(reviews / 540 / 0.03))
-    monthly_high = max(monthly_low, round(reviews / 180 / 0.01))
+    # Tier 3: review-volume prior. This is deliberately low-confidence and
+    # should never be presented as actual orders.
+    if reviews:
+        # Broad prior only; no invented exact daily sales.
+        lo=max(1, round(reviews/365/30))
+        hi=max(lo, round(reviews/90/10))
+        confidence=30
+        if rating: confidence += 5
+        if data.get("price"): confidence += 5
+        return {"daily_low":lo,"daily_high":hi,"confidence":min(confidence,40),"basis":"review_volume_prior"}
 
-    # Rating can slightly tighten, never create false precision.
-    if rating and rating >= 4.7:
-        monthly_low = round(monthly_low * 1.05)
-        monthly_high = round(monthly_high * 1.05)
-
-    daily_low = max(1, round(monthly_low / 30))
-    daily_high = max(daily_low, round(monthly_high / 30))
-
-    confidence = 25
-    if price: confidence += 10
-    if rating: confidence += 10
-    if reviews >= 100: confidence += 10
-    confidence = min(confidence, 55)
-
-    return {
-        "daily_low": daily_low,
-        "daily_high": daily_high,
-        "confidence": confidence,
-        "basis": "review_volume_heuristic"
-    }
+    return {"daily_low":None,"daily_high":None,"confidence":5,"basis":"public_data_insufficient"}
 
 def periods(est, price):
     if est.get("daily_low") is None:
@@ -319,7 +375,7 @@ def analyze(req: AnalyzeRequest):
     # First snapshot is stored immediately, enabling later time-series tracking.
     c.execute("""INSERT INTO snapshots(product_id,captured_at,price,stock,review_count,rating,raw_json)
                  VALUES(?,?,?,?,?,?,?)""",
-              (pid,datetime.now(timezone.utc).isoformat(),data["price"],None,
+              (pid,datetime.now(timezone.utc).isoformat(),data["price"],data.get("stock"),
                data["review_count"],data["rating"],json.dumps(data,ensure_ascii=False)))
     c.commit()
 
@@ -332,6 +388,12 @@ def analyze(req: AnalyzeRequest):
         "periods":periods(est,data["price"]),
         "commission_rate":None,
         "commission_note":"Kategori komisyonu henüz otomatik doğrulanmadı; yanlış oran göstermemek için boş bırakıldı.",
+        "data_quality": {
+            "purchase_signal_24h": data.get("purchase_signal_24h"),
+            "sales_badge": data.get("sales_badge"),
+            "sales_badge_rank": data.get("sales_badge_rank"),
+            "stock": data.get("stock")
+        },
         "snapshot_count":c.execute("SELECT COUNT(*) FROM snapshots WHERE product_id=?",(pid,)).fetchone()[0],
         "message":"Bu satış rakamları tahmindir. Gerçek rakip sipariş adedi pazaryerinin herkese açık verisi değildir. Ürün tekrar analiz edildikçe zaman serisi oluşur."
     }
