@@ -1,37 +1,30 @@
-# Pazaryeri İstihbarat V5
+# Pazaryeri İstihbarat V7
 
-Trendyol / Hepsiburada ürün URL'sinden herkese açık verileri okuyup satış ve ciro için tahmini aralık üreten FastAPI MVP.
+Trendyol / Hepsiburada ürün URL'sinden herkese açık ürün sinyallerini normalize eden ve kanıt seviyesine göre tahmini satış/ciro üreten MVP.
 
-## V5'teki yaklaşım
-- Açık 24 saatlik satın alma sinyali varsa en güçlü sinyal olarak kullanılır.
-- "En Çok Satan #X" etiketi varsa yorum hacmiyle birlikte geniş bir satış tahmini üretilir.
-- Ürün tekrar analiz edildikçe snapshot geçmişi tutulur.
-- Yorum hızı oluştuğunda geniş bir yorum→sipariş oranı heuristiği ile zaman serisi tahmini yapılır.
-- Açık stok, tek başına satış kabul edilmez; yalnızca yardımcı sinyal olarak değerlendirilir.
-- Günlük, 3 günlük, 7 günlük ve 30 günlük satış + ciro tahminleri gösterilir.
-- Güven skoru ve tahminin nedenleri gösterilir.
+## V7 değişiklikleri
+- Kategori ve kategori URL'si için JSON-LD + breadcrumb + HTML fallback'leri.
+- Kategori/satış sırası sinyalini ayrı alan olarak gösterme.
+- Açık 24 saatlik satış sinyali varsa en güçlü sinyal olarak kullanma.
+- Toplam stok miktarını satış sinyali olarak KULLANMAMA.
+- Satış tahmininde kanıt seviyesi: strong / medium / medium-low / weak / none.
+- Günlük merkez tahmini + dar tahmin bandı.
+- Günlük, 3 günlük, 7 günlük ve 30 günlük satış + ciro.
+- Tahmin nedenlerinin kullanıcıya açık gösterimi.
+- Eski SQLite veritabanı varsa `category_url` alanını otomatik ekleme.
+
+## Önemli
+Rakip mağazanın gerçek sipariş adedi resmi satıcı API'sinden alınamaz. Bu nedenle satış rakamları tahmindir. Açık bir satın alma/satış sinyali yoksa model bunu açıkça belirtir.
 
 ## Çalıştırma
+
 ```bash
 pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload
 ```
 
-## Render
-Build:
-```text
-pip install -r requirements.txt
-```
-Start:
-```text
+Render Start Command:
+
+```bash
 uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
-
-> Not: Render Free üzerinde yerel SQLite kalıcı veri tabanı değildir; üretim sürümünde PostgreSQL veya başka kalıcı depolama kullanılmalıdır.
-
-
-## V6 tahmin sunumu
-- Günlük merkez tahmin ayrıca gösterilir.
-- Satış aralıkları önceki sürüme göre daraltıldı.
-- Varsayılan tahmin bandı yaklaşık ±25% seviyesindedir.
-- Bu daraltma doğruluğu garanti etmez; veri yetersizse güven skoru düşük kalır.
