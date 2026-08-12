@@ -1,0 +1,12 @@
+{
+  "rules": [
+    {"keywords": ["pet shop", "evcil hayvan", "kedi", "köpek", "kuş", "balık", "hayvan maması"], "rate": 15.25, "label": "Pet Shop / Evcil Hayvan", "source": "2026 referans tablosu", "source_url": "https://buyboxla.com/komisyon/pet-shop"},
+    {"keywords": ["gıda", "atıştırmalık", "kuru gıda", "süpermarket"], "rate": 15.25, "label": "Gıda / Süpermarket", "source": "2026 referans tablosu", "source_url": "https://nparadox.com/araclar/trendyol-komisyon-oranlari"},
+    {"keywords": ["kozmetik", "kişisel bakım"], "rate": 16.78, "label": "Kozmetik / Kişisel Bakım", "source": "2026 referans tablosu", "source_url": "https://nparadox.com/araclar/trendyol-komisyon-oranlari"},
+    {"keywords": ["anne & bebek", "anne bebek"], "rate": 16.50, "label": "Anne & Bebek", "source": "2026 referans tablosu", "source_url": "https://nparadox.com/araclar/trendyol-komisyon-oranlari"},
+    {"keywords": ["giyim", "moda", "üst giyim", "alt giyim"], "rate": 21.36, "label": "Giyim", "source": "2026 referans tablosu", "source_url": "https://nparadox.com/araclar/trendyol-komisyon-oranlari"},
+    {"keywords": ["ayakkabı"], "rate": 23.39, "label": "Ayakkabı", "source": "2026 referans tablosu", "source_url": "https://nparadox.com/araclar/trendyol-komisyon-oranlari"},
+    {"keywords": ["çanta", "aksesuar"], "rate": 22.37, "label": "Çanta / Aksesuar", "source": "2026 referans tablosu", "source_url": "https://nparadox.com/araclar/trendyol-komisyon-oranlari"},
+    {"keywords": ["spor", "outdoor"], "rate": 15.00, "label": "Spor / Outdoor", "source": "2026 referans tablosu", "source_url": "https://stokoloji.com/icerik/trendyol-komisyon-oranlari"}
+  ]
+}

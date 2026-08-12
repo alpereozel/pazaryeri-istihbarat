@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pazaryeri İstihbarat</title>
 <style>
-body{font-family:Arial,sans-serif;max-width:1180px;margin:28px auto;padding:0 18px;background:#f5f6f8;color:#151515}.header{margin-bottom:18px}.header h1{margin:0 0 7px;font-size:28px}.muted{color:#666;font-size:13px}.card{background:#fff;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 5px 20px #0000000b}input{width:calc(100% - 120px);box-sizing:border-box;padding:14px;border:1px solid #d8d8d8;border-radius:10px;font-size:14px}button{padding:14px 20px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:700;cursor:pointer}.top{display:flex;gap:8px}.badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#f0f2f5;font-size:11px;text-transform:uppercase}.product-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}.metric{background:#f2f3f5;border-radius:12px;padding:14px}.metric b{display:block;font-size:17px;margin-bottom:4px}.metric span{font-size:12px;color:#666}.section-title{font-size:19px;margin:4px 0 14px}.periods{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.period{background:#f2f3f5;border-radius:13px;padding:15px}.period h3{margin:0 0 10px;font-size:15px}.sales{font-size:20px;font-weight:800}.revenue{font-size:15px;font-weight:700;margin-top:5px}.small{font-size:11px;color:#666}.analysis-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}.why{background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px}.why ul{margin:8px 0 0;padding-left:20px}.warning{margin-top:12px;padding:12px;border-radius:10px;background:#fff3cd;font-size:12px;color:#6b4e00}.link{font-size:12px;word-break:break-all}.error{background:#fff0f0;color:#a00000;padding:14px;border-radius:10px}.score{font-size:24px;font-weight:800}.center{font-size:22px;font-weight:800}.trend{font-size:16px;font-weight:800}.quality{font-size:12px;color:#555}@media(max-width:850px){.product-grid,.periods,.analysis-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:550px){.top{display:block}input{width:100%;margin-bottom:8px}.product-grid,.periods,.analysis-grid{grid-template-columns:1fr}}
+body{font-family:Arial,sans-serif;max-width:1180px;margin:28px auto;padding:0 18px;background:#f5f6f8;color:#151515}.header{margin-bottom:18px}.header h1{margin:0 0 7px;font-size:28px}.muted{color:#666;font-size:13px}.card{background:#fff;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 5px 20px #0000000b}input{width:calc(100% - 120px);box-sizing:border-box;padding:14px;border:1px solid #d8d8d8;border-radius:10px;font-size:14px}button{padding:14px 20px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:700;cursor:pointer}.top{display:flex;gap:8px}.badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#f0f2f5;font-size:11px;text-transform:uppercase}.product-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}.metric{background:#f2f3f5;border-radius:12px;padding:14px}.metric b{display:block;font-size:17px;margin-bottom:4px}.metric span{font-size:12px;color:#666}.section-title{font-size:19px;margin:4px 0 14px}.periods{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.period{background:#f2f3f5;border-radius:13px;padding:15px}.period h3{margin:0 0 10px;font-size:15px}.sales{font-size:20px;font-weight:800}.revenue{font-size:15px;font-weight:700;margin-top:5px}.small{font-size:11px;color:#666}.analysis-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}.why{background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px}.why ul{margin:8px 0 0;padding-left:20px}.warning{margin-top:12px;padding:12px;border-radius:10px;background:#fff3cd;font-size:12px;color:#6b4e00}.link{font-size:12px;word-break:break-all}.error{background:#fff0f0;color:#a00000;padding:14px;border-radius:10px}.score{font-size:24px;font-weight:800}.center{font-size:22px;font-weight:800}.trend{font-size:16px;font-weight:800}.quality{font-size:12px;color:#555}.commission{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.track-row{display:flex;gap:10px;align-items:center}.track-status{font-size:12px;color:#555}@media(max-width:850px){.commission{grid-template-columns:repeat(2,1fr)}}@media(max-width:850px){.product-grid,.periods,.analysis-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:550px){.top{display:block}input{width:100%;margin-bottom:8px}.product-grid,.periods,.analysis-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -17,6 +17,16 @@ function money(v){if(v===null||v===undefined)return '—';return new Intl.Number
 function esc(v){return String(v??'—').replace(/[&<>'"]/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[s]))}
 function period(title,p){if(!p)return '';return `<div class="period"><h3>${title}</h3><div class="sales">${p.sales_low??'—'}–${p.sales_high??'—'} adet</div><div class="revenue">${money(p.revenue_low)} – ${money(p.revenue_high)}</div><div class="small">Tahmini ciro</div></div>`}
 function metric(v,l){return `<div class="metric"><b>${esc(v)}</b><span>${esc(l)}</span></div>`}
+function evaluateCommission(c){ return c?.rate!=null ? '%' + c.rate : '—'; }
+async function toggleTrack(url, isTracked){
+  try{
+    const r=await fetch('/api/track',{method:isTracked?'DELETE':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||'Takip işlemi başarısız');
+    alert(isTracked?'Takipten çıkarıldı.':'Ürün 2 saatlik takip listesine eklendi.');
+    analyze();
+  }catch(err){ alert(err.message); }
+}
 async function analyze(){
  const url=document.getElementById('url').value.trim(); if(!url)return;
  document.getElementById('result').innerHTML='<div class="card">Analiz ediliyor…</div>';
@@ -41,6 +51,10 @@ async function analyze(){
       ${metric(p.category_rank_source||'—','Sıra veri kaynağı')}
     </div>
     ${p.category_url?`<div class="link" style="margin-top:10px">Kategori: ${esc(p.category_url)}</div>`:''}
+    <div class="track-row" style="margin-top:12px">
+      <button onclick="toggleTrack(${JSON.stringify(url)}, ${d.tracked?'true':'false'})">${d.tracked?'Takipte ✓':'2 Saatlik Takibe Al'}</button>
+      <span class="track-status">${d.tracked?'Bu ürün otomatik takip listesinde.':'Butona basınca GitHub tabanlı 2 saatlik takip listesine eklenir.'}</span>
+    </div>
    </div>
    <div class="card">
     <div class="section-title">Satış ve Ciro Tahmini</div>
@@ -63,6 +77,16 @@ async function analyze(){
     </div>
     ${d.trend?.detail?`<div class="quality" style="margin-top:10px"><b>Trend detayı:</b> ${esc(d.trend.detail)}</div>`:''}
     <div class="warning">⚠️ Bu rakamlar tahmindir; rakip mağazanın gerçek sipariş adedi değildir. Stok toplamı tek başına satış olarak kabul edilmez. Açık satış sinyali bulunmadığında sonuç model tahminidir.</div>
+   </div>
+   <div class="card">
+    <div class="section-title">Komisyon</div>
+    <div class="commission">
+      ${metric(evaluateCommission(d.commission),'Komisyon oranı')}
+      ${metric(d.commission?.amount_on_current_price!=null?money(d.commission.amount_on_current_price):'—','Mevcut fiyatta komisyon')}
+      ${metric(d.commission?.label||'—','Eşleşen kategori')}
+      ${metric(d.commission?.source||'—','Kaynak')}
+    </div>
+    <div class="quality" style="margin-top:10px">${esc(d.commission?.note||'')}</div>
    </div>
    <div class="card"><b>Veri kalitesi</b><div class="quality" style="margin-top:8px">Tahmin seviyesi: ${esc(e.evidence_level||'—')} · ${esc(d.message||'')}</div><div class="quality" style="margin-top:6px">Not: Satış potansiyeli popülerlik göstergesidir; tahmini satış adedi değildir.</div></div>`;
  }catch(err){document.getElementById('result').innerHTML=`<div class="card"><div class="error">${esc(err.message)}</div></div>`}

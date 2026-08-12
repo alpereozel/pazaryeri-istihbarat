@@ -3,11 +3,11 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, HttpUrl
 from urllib.parse import urlparse, urljoin
 from datetime import datetime, timezone
-import sqlite3, json, re, requests, html as html_lib, math
+import sqlite3, json, re, requests, html as html_lib, math, os, base64
 from bs4 import BeautifulSoup
 
 DB = "marketintel.db"
-app = FastAPI(title="Pazaryeri İstihbarat", version="0.9.0")
+app = FastAPI(title="Pazaryeri İstihbarat", version="1.0.0")
 
 
 def db():
@@ -258,6 +258,86 @@ def normalize_title(s):
     return re.sub(r'\s+',' ',s).strip()
 
 
+
+COMMISSION_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "commission_rules.json")
+DEFAULT_REPO = os.getenv("GITHUB_REPO", "alperoezel/pazaryeri-istihbarat")
+
+
+def commission_for_category(category):
+    if not category:
+        return {"rate": None, "label": None, "source": None, "source_url": None, "note": "Kategori komisyonu otomatik eşleştirilemedi."}
+    try:
+        rules = json.loads(open(COMMISSION_FILE, encoding="utf-8").read()).get("rules", [])
+    except Exception:
+        rules = []
+    text = clean_text(category).lower()
+    for rule in rules:
+        if any(k.lower() in text for k in rule.get("keywords", [])):
+            return {
+                "rate": rule.get("rate"),
+                "label": rule.get("label"),
+                "source": rule.get("source"),
+                "source_url": rule.get("source_url"),
+                "note": "Referans orandır; satıcı panelindeki sözleşmeli oran kampanya/alt kategori nedeniyle farklı olabilir."
+            }
+    return {"rate": None, "label": None, "source": None, "source_url": None, "note": "Kategori komisyonu otomatik eşleştirilemedi."}
+
+
+def github_headers():
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        return None
+    return {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+
+
+def github_file(path):
+    headers = github_headers()
+    if not headers:
+        return None, None
+    repo = os.getenv("GITHUB_REPO", DEFAULT_REPO)
+    r = requests.get(f"https://api.github.com/repos/{repo}/contents/{path}", headers=headers, timeout=15)
+    if r.status_code != 200:
+        return None, None
+    obj = r.json()
+    try:
+        raw = base64.b64decode(obj["content"]).decode("utf-8")
+        return json.loads(raw), obj.get("sha")
+    except Exception:
+        return None, obj.get("sha")
+
+
+def github_put_json(path, payload, sha=None, message="Pazaryeri takip listesi güncellendi"):
+    headers = github_headers()
+    if not headers:
+        raise HTTPException(503, "Takip özelliği için Render Environment Variables bölümüne GITHUB_TOKEN eklenmeli.")
+    repo = os.getenv("GITHUB_REPO", DEFAULT_REPO)
+    content = base64.b64encode(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")).decode("ascii")
+    body = {"message": message, "content": content, "branch": os.getenv("GITHUB_BRANCH", "main")}
+    if sha:
+        body["sha"] = sha
+    r = requests.put(f"https://api.github.com/repos/{repo}/contents/{path}", headers=headers, json=body, timeout=20)
+    if r.status_code not in (200, 201):
+        raise HTTPException(502, f"GitHub veri kaydı başarısız: {r.text[:300]}")
+    return r.json()
+
+
+def tracked_urls_remote():
+    data, _ = github_file("data/tracked_urls.json")
+    return data if isinstance(data, list) else []
+
+
+def remote_history_for(pid):
+    repo = os.getenv("GITHUB_REPO", DEFAULT_REPO)
+    url = f"https://raw.githubusercontent.com/{repo}/{os.getenv('TRACKING_BRANCH','tracker-data')}/data/tracking_history.json"
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return []
+        obj = r.json()
+        return obj.get(pid, []) if isinstance(obj, dict) else []
+    except Exception:
+        return []
+
 def category_page_rank(category_url, product_title):
     """Try to recover the marketplace's explicit 'En Çok Satan #N' label from the category page."""
     if not category_url or 'trendyol.com' not in urlparse(category_url).netloc:
@@ -409,7 +489,16 @@ def get_history(product_id):
     c = db()
     rows = [dict(x) for x in c.execute("SELECT * FROM snapshots WHERE product_id=? ORDER BY captured_at", (product_id,)).fetchall()]
     c.close()
-    return rows
+    remote = remote_history_for(product_id)
+    merged = rows + remote
+    merged.sort(key=lambda x: x.get("captured_at", ""))
+    # Deduplicate by timestamp.
+    seen = set(); out = []
+    for row in merged:
+        key = row.get("captured_at")
+        if key in seen: continue
+        seen.add(key); out.append(row)
+    return out
 
 
 def time_series_signal(history):
@@ -605,13 +694,18 @@ def analyze(req: AnalyzeRequest):
 
     history = get_history(pid)
     est = estimate_from_current(data, history)
+    commission = commission_for_category(data.get("category"))
+    tracked = url in tracked_urls_remote()
+    rate = commission.get("rate")
+    gross = data.get("price")
+    commission_amount = round(gross * rate / 100, 2) if gross is not None and rate is not None else None
     return {
         "product_id": pid, "marketplace": mp, "product": data,
         "estimate": est, "periods": make_periods(est, data.get("price")),
         "history": {"snapshots": len(history), "time_series": time_series_signal(history)},
         "trend": est.get("trend"),
-        "commission_rate": None,
-        "commission_note": "Kategori komisyonu henüz otomatik doğrulanmadı; yanlış oran göstermemek için boş bırakıldı.",
+        "commission": {**commission, "amount_on_current_price": commission_amount},
+        "tracked": tracked,
         "message": "Tahmin gerçek sipariş verisi değildir. Güçlü açık satış sinyali varsa önceliklidir; aksi halde kategori sırası, yorum hızı ve diğer açık sinyaller birlikte değerlendirilir.",
     }
 
@@ -627,6 +721,32 @@ def add_snapshot(req: SnapshotRequest):
               (req.product_id, now, req.price, req.stock, req.review_count, req.rating, json.dumps(req.model_dump(), ensure_ascii=False)))
     c.commit(); c.close()
     return {"ok": True, "captured_at": now}
+
+
+
+@app.post("/api/track")
+def track(req: AnalyzeRequest):
+    url = str(req.url)
+    if marketplace(url) == "unknown":
+        raise HTTPException(400, "Sadece Trendyol ve Hepsiburada URL'leri destekleniyor.")
+    urls = tracked_urls_remote()
+    if url not in urls:
+        urls.append(url)
+        github_put_json("data/tracked_urls.json", sorted(set(urls)), message="Ürün takibe alındı")
+    return {"ok": True, "tracked": True, "count": len(urls), "message": "Ürün 2 saatlik otomatik takip listesine eklendi."}
+
+
+@app.delete("/api/track")
+def untrack(req: AnalyzeRequest):
+    url = str(req.url)
+    urls = [x for x in tracked_urls_remote() if x != url]
+    github_put_json("data/tracked_urls.json", urls, message="Ürün takipten çıkarıldı")
+    return {"ok": True, "tracked": False, "count": len(urls)}
+
+
+@app.get("/api/tracked")
+def tracked():
+    return {"urls": tracked_urls_remote()}
 
 
 @app.get("/api/products")
