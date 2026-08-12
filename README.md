@@ -1,67 +1,30 @@
-# Pazaryeri İstihbarat MVP
+# Pazaryeri İstihbarat V5
 
-Bu proje, Trendyol/Hepsiburada ürün URL'sinden ürün analizi başlatmak için hazırlanmış bir MVP iskeletidir.
+Trendyol / Hepsiburada ürün URL'sinden herkese açık verileri okuyup satış ve ciro için tahmini aralık üreten FastAPI MVP.
 
-## MVP'nin yaptığı
-- Ürün URL'sini kabul eder.
-- Pazaryerini URL'den algılar.
-- Ürün/satıcı/fiyat/kategori/puan/yorum gibi verileri normalize eder.
-- Zaman içinde alınan snapshot'ları SQLite'ta saklar.
-- Stok ve yorum değişimlerinden tahmini satış hesaplar.
-- Günlük/3 günlük/7 günlük/30 günlük tahmini satış ve ciro üretir.
-- Kategori komisyon oranı girildiğinde tahmini komisyon ve katkı marjı hesaplar.
-- Basit bir web dashboard'u sunar.
-
-## Önemli
-Rakip mağazanın gerçek sipariş verisi resmi satıcı API'sinden alınamaz. Bu MVP'deki satış rakamları "tahmin" mantığıyla çalışır.
-
-Canlı Trendyol entegrasyonu için güncel Product V2 API'leri kullanılmalıdır. Trendyol'un eski Product V1 servisleri 10 Ağustos 2026 itibarıyla kullanım dışı bırakılmıştır.
+## V5'teki yaklaşım
+- Açık 24 saatlik satın alma sinyali varsa en güçlü sinyal olarak kullanılır.
+- "En Çok Satan #X" etiketi varsa yorum hacmiyle birlikte geniş bir satış tahmini üretilir.
+- Ürün tekrar analiz edildikçe snapshot geçmişi tutulur.
+- Yorum hızı oluştuğunda geniş bir yorum→sipariş oranı heuristiği ile zaman serisi tahmini yapılır.
+- Açık stok, tek başına satış kabul edilmez; yalnızca yardımcı sinyal olarak değerlendirilir.
+- Günlük, 3 günlük, 7 günlük ve 30 günlük satış + ciro tahminleri gösterilir.
+- Güven skoru ve tahminin nedenleri gösterilir.
 
 ## Çalıştırma
-
-Python 3.11+:
-
 ```bash
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Sonra:
-http://127.0.0.1:8000
-
-## API
-POST /api/analyze
-```json
-{"url":"https://www.trendyol.com/ornek-urun-p-123"}
+## Render
+Build:
+```text
+pip install -r requirements.txt
+```
+Start:
+```text
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
-POST /api/snapshots
-```json
-{
-  "product_id":"trendyol:123",
-  "price":299.90,
-  "stock":87,
-  "review_count":1241
-}
-```
-
-GET /api/products
-GET /api/products/{product_id}
-
-
-## V2 ekran sıralaması
-Analiz ekranında satış ve ciro tahminleri şu sırayla gösterilir:
-1. Günlük satış + günlük ciro
-2. 3 günlük satış + 3 günlük ciro
-3. 7 günlük satış + 7 günlük ciro
-4. Aylık (30 günlük) satış + aylık ciro
-
-Bu değerler tahmindir; veri biriktikçe güven skoru yükselir.
-
-
-## V3
-- Ürün sayfasından JSON-LD / meta / HTML sinyallerini okur.
-- Anında ürün fiyatı, marka, satıcı, kategori, puan ve yorum sayısını göstermeye çalışır.
-- Günlük, 3 günlük, 7 günlük ve aylık satış + ciro tahmini üretir.
-- Satış tahmini açıkça heuristik/tahmin olarak etiketlenir.
-- Her analiz ilk snapshot'ı kaydeder.
+> Not: Render Free üzerinde yerel SQLite kalıcı veri tabanı değildir; üretim sürümünde PostgreSQL veya başka kalıcı depolama kullanılmalıdır.

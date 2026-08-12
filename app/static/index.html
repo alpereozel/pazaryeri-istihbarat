@@ -1,105 +1,21 @@
 <!doctype html>
 <html lang="tr">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pazaryeri İstihbarat</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pazaryeri İstihbarat V5</title>
 <style>
-body{font-family:Arial,sans-serif;max-width:1150px;margin:35px auto;padding:0 18px;background:#f6f7f9;color:#171717}
-.card{background:#fff;border-radius:18px;padding:24px;margin:18px 0;box-shadow:0 4px 20px #0000000d}
-input{width:78%;box-sizing:border-box;padding:15px;border:1px solid #ddd;border-radius:11px;font-size:15px}
-button{padding:15px 22px;border:0;border-radius:11px;cursor:pointer;background:#111;color:#fff;font-weight:600}
-h1{margin-bottom:8px}.muted{color:#666}.product-title{font-size:25px;font-weight:700}
-.info{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:18px}
-.info div{background:#f3f4f6;border-radius:12px;padding:14px}
-.periods{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
-.period{background:#f3f4f6;border-radius:14px;padding:18px}
-.period h3{margin:0 0 14px}
-.sales{font-size:22px;font-weight:700}
-.revenue{font-size:18px;font-weight:700;margin-top:8px}
-.badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#eee;font-size:12px}
-.warning{padding:14px;background:#fff7df;border-radius:12px;margin-top:16px;color:#5f4b00}
-@media(max-width:850px){.periods,.info{grid-template-columns:repeat(2,1fr)}input{width:100%;margin-bottom:10px}}
-@media(max-width:520px){.periods,.info{grid-template-columns:1fr}}
-</style>
-</head>
+body{font-family:Arial,sans-serif;max-width:1180px;margin:35px auto;padding:0 18px;background:#f6f7f9;color:#171717}.card{background:#fff;border-radius:18px;padding:24px;margin:18px 0;box-shadow:0 4px 20px #0000000d}input{width:80%;box-sizing:border-box;padding:15px;border:1px solid #ddd;border-radius:11px;font-size:15px}button{padding:15px 22px;border:0;border-radius:11px;cursor:pointer;background:#111;color:#fff;font-weight:600}.muted{color:#666}.product-title{font-size:25px;font-weight:700}.info{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:18px}.info div,.signal{background:#f3f4f6;border-radius:12px;padding:14px}.periods{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.period{background:#f3f4f6;border-radius:14px;padding:18px}.period h3{margin:0 0 14px}.sales{font-size:22px;font-weight:700}.revenue{font-size:18px;font-weight:700;margin-top:8px}.badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#eee;font-size:12px}.warning{padding:14px;background:#fff7df;border-radius:12px;margin-top:16px;color:#5f4b00}.reasons{margin:10px 0 0 18px;padding:0}.score{font-size:28px;font-weight:800}.good{font-weight:700}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:850px){.periods,.info{grid-template-columns:repeat(2,1fr)}input{width:100%;margin-bottom:10px}}@media(max-width:520px){.periods,.info,.two{grid-template-columns:1fr}}
+</style></head>
 <body>
-<h1>📊 Pazaryeri İstihbarat</h1>
-<p class="muted">Trendyol / Hepsiburada ürün linkini yapıştır ve anında analiz et.</p>
-
-<div class="card">
-  <input id="url" placeholder="https://www.trendyol.com/...-p-123456">
-  <button onclick="analyze()">Analiz Et</button>
-</div>
-
+<h1>📊 Pazaryeri İstihbarat</h1><p class="muted">Trendyol / Hepsiburada ürün linkini yapıştır ve anında analiz et.</p>
+<div class="card"><input id="url" placeholder="https://www.trendyol.com/...-p-123456"><button onclick="analyze()">Analiz Et</button></div>
 <div id="result"></div>
-
 <script>
-function money(v){
-  if(v===null || v===undefined) return "—";
-  return new Intl.NumberFormat("tr-TR",{style:"currency",currency:"TRY",maximumFractionDigits:0}).format(v);
-}
-function val(v){ return v===null || v===undefined || v==="" ? "—" : v; }
-function period(title,p){
-  if(!p) return "";
-  const sales = p.sales_low===null ? "—" : `${p.sales_low}–${p.sales_high} adet`;
-  const rev = p.revenue_low===null ? "—" : `${money(p.revenue_low)} – ${money(p.revenue_high)}`;
-  return `<div class="period"><h3>${title}</h3><div class="sales">${sales}</div><div class="revenue">${rev}</div><div class="muted">Tahmini ciro</div></div>`;
-}
-async function analyze(){
-  const url=document.getElementById("url").value.trim();
-  if(!url) return;
-  document.getElementById("result").innerHTML='<div class="card">Analiz yapılıyor…</div>';
-  try{
-    const r=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
-    const d=await r.json();
-    if(!r.ok) throw new Error(d.detail||"Analiz başarısız");
-    const p=d.product||{}, e=d.estimate||{}, ps=d.periods||{};
-    document.getElementById("result").innerHTML=`
-      <div class="card">
-        <div class="badge">${d.marketplace.toUpperCase()}</div>
-        <div class="product-title" style="margin-top:10px">${val(p.title)}</div>
-        <div class="info">
-          <div><b>${val(p.price)} TL</b><br><span class="muted">Satış fiyatı</span></div>
-          <div><b>${val(p.rating)}</b><br><span class="muted">Puan</span></div>
-          <div><b>${val(p.review_count)}</b><br><span class="muted">Yorum</span></div>
-          <div><b>${val(p.seller)}</b><br><span class="muted">Satıcı</span></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Satış ve Ciro Tahmini</h2>
-        <div class="periods">
-          ${period("Günlük",ps.daily)}
-          ${period("3 Günlük",ps["3_days"])}
-          ${period("7 Günlük",ps["7_days"])}
-          ${period("Aylık",ps.monthly)}
-        </div>
-        <div class="info" style="margin-top:12px">
-          <div><b>%${e.confidence||0}</b><br><span class="muted">Tahmin güveni</span></div>
-          <div><b>${e.basis||"—"}</b><br><span class="muted">Tahmin yöntemi</span></div>
-          <div><b>${val(p.brand)}</b><br><span class="muted">Marka</span></div>
-          <div><b>${val(p.category)}</b><br><span class="muted">Kategori</span></div>
-        </div>
-        <div class="info" style="margin-top:12px">
-          <div><b>${val(p.purchase_signal_24h)}</b><br><span class="muted">Açık 24s satış sinyali</span></div>
-          <div><b>${val(p.sales_badge)}${p.sales_badge_rank ? ' #' + p.sales_badge_rank : ''}</b><br><span class="muted">Pazaryeri etiketi</span></div>
-          <div><b>${val(p.stock)}</b><br><span class="muted">Açık stok sinyali</span></div>
-          <div><b>${e.basis||'—'}</b><br><span class="muted">Model tabanı</span></div>
-        </div>
-        <div class="warning">
-          ⚠️ Bu satış ve ciro rakamları <b>tahmindir</b>. Açık bir “son 24 saatte X kişi aldı” sinyali bulunursa onu öncelikli kullanırız; yoksa model yorum/etiket gibi dolaylı sinyallere düşer. Ürün tekrar analiz edildikçe zaman serisi oluşacak ve tahmin modeli güçlendirilecektir.
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Komisyon</h3>
-        <p>${d.commission_note}</p>
-      </div>`;
-  }catch(err){
-    document.getElementById("result").innerHTML=`<div class="card"><b>Hata:</b> ${err.message}</div>`;
-  }
-}
-</script>
-</body>
-</html>
+function money(v){if(v===null||v===undefined)return "—";return new Intl.NumberFormat("tr-TR",{style:"currency",currency:"TRY",maximumFractionDigits:0}).format(v)}
+function val(v){return v===null||v===undefined||v===""?"—":v}
+function period(title,p){if(!p)return "";let s=p.sales_low===null?"—":`${p.sales_low}–${p.sales_high} adet`;let r=p.revenue_low===null?"—":`${money(p.revenue_low)} – ${money(p.revenue_high)}`;return `<div class="period"><h3>${title}</h3><div class="sales">${s}</div><div class="revenue">${r}</div><div class="muted">Tahmini ciro</div></div>`}
+async function analyze(){const url=document.getElementById("url").value.trim();if(!url)return;document.getElementById("result").innerHTML='<div class="card">Analiz yapılıyor…</div>';try{const r=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});const d=await r.json();if(!r.ok)throw new Error(d.detail||"Analiz başarısız");const p=d.product||{},e=d.estimate||{},ps=d.periods||{},ts=d.history?.time_series||null;const reasons=(e.reasons||[]).map(x=>`<li>${x}</li>`).join("");document.getElementById("result").innerHTML=`
+<div class="card"><div class="badge">${d.marketplace.toUpperCase()}</div><div class="product-title" style="margin-top:10px">${val(p.title)}</div><div class="info"><div><b>${val(p.price)} TL</b><br><span class="muted">Satış fiyatı</span></div><div><b>${val(p.list_price)} TL</b><br><span class="muted">Liste fiyatı</span></div><div><b>${val(p.rating)}</b><br><span class="muted">Puan</span></div><div><b>${val(p.review_count)}</b><br><span class="muted">Yorum</span></div><div><b>${val(p.seller)}</b><br><span class="muted">Satıcı</span></div><div><b>${val(p.brand)}</b><br><span class="muted">Marka</span></div><div><b>${val(p.category)}</b><br><span class="muted">Kategori</span></div><div><b>${val(p.sales_badge)}${p.sales_badge_rank?' #'+p.sales_badge_rank:''}</b><br><span class="muted">Satış etiketi</span></div></div></div>
+<div class="card"><h2>Satış ve Ciro Tahmini</h2><div class="periods">${period("Günlük",ps.daily)}${period("3 Günlük",ps["3_days"])}${period("7 Günlük",ps["7_days"])}${period("Aylık",ps.monthly)}</div><div class="info"><div><div class="score">%${e.confidence||0}</div><span class="muted">Tahmin güveni</span></div><div><div class="score">${e.score||0}/100</div><span class="muted">Satış potansiyeli</span></div><div><b>${val(p.purchase_signal_24h)}</b><br><span class="muted">Açık 24s satış sinyali</span></div><div><b>${val(p.sold_total_signal)}</b><br><span class="muted">Açık toplam satış sinyali</span></div></div><div class="two" style="margin-top:12px"><div class="signal"><b>Tahmin yöntemi</b><br>${val(e.basis)}</div><div class="signal"><b>Takip verisi</b><br>${d.history?.snapshots||0} snapshot ${ts?`· ${ts.days.toFixed(1)} gün`:''}</div></div><div class="signal" style="margin-top:12px"><b>Neden bu aralık?</b><ul class="reasons">${reasons||'<li>Yeterli açıklayıcı sinyal yok.</li>'}</ul></div><div class="warning">⚠️ Bu rakamlar <b>tahmindir</b>, rakip mağazanın gerçek sipariş adedi değildir. Açık 24 saatlik satış sayısı varsa onu kullanırız. Yoksa satış etiketi, yorum hacmi ve zaman içinde ölçülen yorum/stok değişimleri ile geniş bir aralık üretiriz. Stok tek başına satış olarak kabul edilmez.</div></div>
+<div class="card"><h3>Komisyon</h3><p>${d.commission_note}</p></div>`}catch(err){document.getElementById("result").innerHTML=`<div class="card"><b>Hata:</b> ${err.message}</div>`}}
+</script></body></html>
