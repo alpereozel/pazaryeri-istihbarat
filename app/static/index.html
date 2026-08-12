@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pazaryeri İstihbarat MVP</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:1100px;margin:40px auto;padding:0 20px;background:#f6f7f9;color:#171717}
+.card{background:white;border-radius:16px;padding:24px;margin:18px 0;box-shadow:0 4px 20px #00000010}
+input{width:75%;padding:14px;border:1px solid #ddd;border-radius:10px}
+button{padding:14px 20px;border:0;border-radius:10px;cursor:pointer;background:#111;color:white}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.periods{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.period{background:#f3f4f6;border-radius:14px;padding:18px}
+.period h4{margin:0 0 12px}
+.period .sales{font-size:25px;font-weight:700}
+.period .revenue{font-size:18px;font-weight:600;margin-top:6px}
+.metric{background:#f3f4f6;border-radius:12px;padding:16px}
+.small{color:#666;font-size:13px}
+@media(max-width:800px){.periods{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:500px){.periods{grid-template-columns:1fr}input{width:100%;box-sizing:border-box;margin-bottom:10px}.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<h1>Pazaryeri İstihbarat</h1>
+<p>Trendyol / Hepsiburada ürün linkini yapıştır ve analiz başlat.</p>
+<div class="card">
+<input id="url" placeholder="https://www.trendyol.com/...-p-123456">
+<button onclick="analyze()">Analiz Et</button>
+</div>
+<div id="result"></div>
+<script>
+function money(v){
+  if(v===null || v===undefined) return '—';
+  return new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY',maximumFractionDigits:2}).format(v);
+}
+function periodCard(title,p){
+  if(!p) return `<div class="period"><h4>${title}</h4><div>Veri bekleniyor</div></div>`;
+  return `<div class="period">
+    <h4>${title}</h4>
+    <div class="sales">${p.sales??'—'} adet</div>
+    <div class="revenue">${money(p.revenue)}</div>
+    <div class="small">Tahmini ciro</div>
+  </div>`;
+}
+async function analyze(){
+  const url=document.getElementById('url').value;
+  const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+  const d=await r.json();
+  if(!r.ok){document.getElementById('result').innerHTML='<div class="card"><b>Hata:</b> '+(d.detail||'Bilinmeyen hata')+'</div>';return;}
+  const e=d.estimate||{};
+  document.getElementById('result').innerHTML=`
+  <div class="card">
+    <h2>${d.page?.title||'Ürün'}</h2>
+    <p>${d.marketplace.toUpperCase()} · ${d.snapshots} snapshot</p>
+    <h3>Satış ve Ciro Tahmini</h3>
+    <div class="periods">
+      ${periodCard("Günlük", d.periods?.daily)}
+      ${periodCard("3 Günlük", d.periods?.["3_days"])}
+      ${periodCard("7 Günlük", d.periods?.["7_days"])}
+      ${periodCard("Aylık", d.periods?.monthly)}
+    </div>
+    <div class="grid" style="margin-top:12px">
+      <div class="metric"><b>%${e.confidence||0}</b><br><span class="small">Tahmin güven skoru</span></div>
+      <div class="metric"><b>${d.snapshots}</b><br><span class="small">Toplanan snapshot</span></div>
+    </div>
+    <p style="margin-top:20px">${d.message}</p>
+  </div>`;
+}
+</script>
+</body>
+</html>
